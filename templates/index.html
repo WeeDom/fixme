@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FixMe - Collaborative Pixel Art</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-blue-600 mb-2">FixMe</h1>
+            <p class="text-gray-600">Collaborative Pixel Art Modification Platform</p>
+            <p class="text-sm text-gray-500">Click a pixel, choose a color, and pay ${{ pixel_price / 100 }} to modify it!</p>
+        </header>
+
+        <div class="grid md:grid-cols-2 gap-8 max-w-6xl mx-auto">
+            <!-- Canvas Section -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-semibold mb-4">Canvas</h2>
+                <div class="flex justify-center mb-4">
+                    <canvas id="pixelCanvas" 
+                            width="500" 
+                            height="500" 
+                            class="border-4 border-gray-300 cursor-crosshair"
+                            style="image-rendering: pixelated; image-rendering: crisp-edges;">
+                    </canvas>
+                </div>
+                <div class="text-center text-sm text-gray-500">
+                    <p>Selected: <span id="selectedPixel">None</span></p>
+                </div>
+            </div>
+
+            <!-- Controls Section -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-semibold mb-4">Modify Pixel</h2>
+                
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Selected Pixel Coordinates
+                    </label>
+                    <div class="bg-gray-50 p-3 rounded border border-gray-200">
+                        <p><strong>X:</strong> <span id="selectedX">-</span></p>
+                        <p><strong>Y:</strong> <span id="selectedY">-</span></p>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Choose Color
+                    </label>
+                    <div class="flex items-center space-x-4">
+                        <input type="color" 
+                               id="colorPicker" 
+                               value="#000000"
+                               class="w-20 h-20 rounded cursor-pointer border-2 border-gray-300">
+                        <div class="flex-1">
+                            <p class="text-sm text-gray-600">RGB: <span id="rgbDisplay">0, 0, 0</span></p>
+                            <p class="text-sm text-gray-600">Hex: <span id="hexDisplay">#000000</span></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <button id="purchaseBtn" 
+                            disabled
+                            class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition">
+                        Purchase Pixel - ${{ pixel_price / 100 }}
+                    </button>
+                </div>
+
+                <div class="border-t pt-6">
+                    <h3 class="text-lg font-semibold mb-3">Recent Changes</h3>
+                    <div id="recentChanges" class="space-y-2 max-h-64 overflow-y-auto">
+                        <p class="text-sm text-gray-500">No recent changes</p>
+                    </div>
+                </div>
+
+                <div class="mt-6 border-t pt-6">
+                    <div class="flex items-center justify-between text-sm">
+                        <span class="text-gray-600">Connected:</span>
+                        <span id="connectionStatus" class="text-red-500">Disconnected</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Section -->
+        <div class="max-w-6xl mx-auto mt-8 bg-white rounded-lg shadow-lg p-6">
+            <h2 class="text-2xl font-semibold mb-4">Statistics</h2>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div>
+                    <p class="text-3xl font-bold text-blue-600" id="totalPixels">0</p>
+                    <p class="text-sm text-gray-600">Total Pixels Modified</p>
+                </div>
+                <div>
+                    <p class="text-3xl font-bold text-green-600" id="totalRevenue">$0</p>
+                    <p class="text-sm text-gray-600">Total Revenue</p>
+                </div>
+                <div>
+                    <p class="text-3xl font-bold text-purple-600" id="activeUsers">0</p>
+                    <p class="text-sm text-gray-600">Active Users</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const CANVAS_PIXELS = 100;
+        const CANVAS_DISPLAY_SIZE = 500;
+        const PIXEL_SIZE = CANVAS_DISPLAY_SIZE / CANVAS_PIXELS;
+        const PROJECT_ID = 1;
+        const STRIPE_PUBLIC_KEY = '{{ stripe_public_key }}';
+        const PIXEL_PRICE = {{ pixel_price }};
+
+        // Initialize Stripe
+        const stripe = Stripe(STRIPE_PUBLIC_KEY);
+
+        // Canvas setup
+        const canvas = document.getElementById('pixelCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // State
+        let selectedPixel = null;
+        let canvasState = {};
+        let totalPixelsModified = 0;
+
+        // WebSocket setup
+        const socket = io();
+
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            document.getElementById('connectionStatus').textContent = 'Connected';
+            document.getElementById('connectionStatus').className = 'text-green-500';
+            
+            // Request current canvas state
+            socket.emit('request_canvas_state', { project_id: PROJECT_ID });
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            document.getElementById('connectionStatus').textContent = 'Disconnected';
+            document.getElementById('connectionStatus').className = 'text-red-500';
+        });
+
+        socket.on('canvas_state', (data) => {
+            console.log('Received canvas state', data);
+            data.pixels.forEach(pixel => {
+                updatePixel(pixel.x, pixel.y, pixel.red, pixel.green, pixel.blue, false);
+            });
+            updateStats();
+        });
+
+        socket.on('pixel_update', (data) => {
+            console.log('Pixel update received', data);
+            if (data.project_id === PROJECT_ID) {
+                updatePixel(data.x, data.y, data.red, data.green, data.blue, true);
+                addRecentChange(data);
+                updateStats();
+            }
+        });
+
+        // Color picker event
+        document.getElementById('colorPicker').addEventListener('input', (e) => {
+            const hex = e.target.value;
+            const rgb = hexToRgb(hex);
+            document.getElementById('rgbDisplay').textContent = `${rgb.r}, ${rgb.g}, ${rgb.b}`;
+            document.getElementById('hexDisplay').textContent = hex;
+        });
+
+        // Canvas click event
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / PIXEL_SIZE);
+            const y = Math.floor((e.clientY - rect.top) / PIXEL_SIZE);
+            
+            if (x >= 0 && x < CANVAS_PIXELS && y >= 0 && y < CANVAS_PIXELS) {
+                selectPixel(x, y);
+            }
+        });
+
+        // Purchase button
+        document.getElementById('purchaseBtn').addEventListener('click', async () => {
+            if (!selectedPixel) return;
+            
+            const color = document.getElementById('colorPicker').value;
+            const rgb = hexToRgb(color);
+            
+            try {
+                document.getElementById('purchaseBtn').disabled = true;
+                document.getElementById('purchaseBtn').textContent = 'Processing...';
+                
+                // Create payment intent
+                const response = await fetch('/api/create-payment-intent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: PROJECT_ID,
+                        x: selectedPixel.x,
+                        y: selectedPixel.y,
+                        red: rgb.r,
+                        green: rgb.g,
+                        blue: rgb.b
+                    })
+                });
+                
+                const { client_secret, payment_intent_id } = await response.json();
+                
+                // For demo purposes, we'll simulate a successful payment
+                // In production, you'd use Stripe Elements to collect payment details
+                alert('Payment simulation: In production, Stripe payment form would appear here.\n\nFor demo: Auto-confirming payment...');
+                
+                // Confirm the pixel (in production, this would happen after payment)
+                const confirmResponse = await fetch('/api/confirm-pixel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payment_id: payment_intent_id })
+                });
+                
+                if (confirmResponse.ok) {
+                    alert('Pixel purchased successfully!');
+                    selectedPixel = null;
+                    document.getElementById('purchaseBtn').disabled = true;
+                    document.getElementById('selectedPixel').textContent = 'None';
+                    document.getElementById('selectedX').textContent = '-';
+                    document.getElementById('selectedY').textContent = '-';
+                } else {
+                    throw new Error('Payment confirmation failed');
+                }
+                
+            } catch (error) {
+                console.error('Purchase error:', error);
+                alert('Purchase failed: ' + error.message);
+            } finally {
+                document.getElementById('purchaseBtn').disabled = false;
+                document.getElementById('purchaseBtn').textContent = `Purchase Pixel - $${PIXEL_PRICE / 100}`;
+            }
+        });
+
+        // Helper functions
+        function selectPixel(x, y) {
+            selectedPixel = { x, y };
+            document.getElementById('selectedPixel').textContent = `(${x}, ${y})`;
+            document.getElementById('selectedX').textContent = x;
+            document.getElementById('selectedY').textContent = y;
+            document.getElementById('purchaseBtn').disabled = false;
+            
+            // Highlight selected pixel
+            drawCanvas();
+            ctx.strokeStyle = 'yellow';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+        }
+
+        function updatePixel(x, y, r, g, b, animate) {
+            const key = `${x},${y}`;
+            canvasState[key] = { x, y, r, g, b };
+            
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+            ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+            
+            if (animate) {
+                // Add a brief flash animation
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+                setTimeout(() => drawCanvas(), 300);
+            }
+        }
+
+        function drawCanvas() {
+            // Clear canvas
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, CANVAS_DISPLAY_SIZE, CANVAS_DISPLAY_SIZE);
+            
+            // Draw grid
+            ctx.strokeStyle = '#f0f0f0';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= CANVAS_PIXELS; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * PIXEL_SIZE, 0);
+                ctx.lineTo(i * PIXEL_SIZE, CANVAS_DISPLAY_SIZE);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(0, i * PIXEL_SIZE);
+                ctx.lineTo(CANVAS_DISPLAY_SIZE, i * PIXEL_SIZE);
+                ctx.stroke();
+            }
+            
+            // Draw pixels
+            for (const key in canvasState) {
+                const pixel = canvasState[key];
+                ctx.fillStyle = `rgb(${pixel.r}, ${pixel.g}, ${pixel.b})`;
+                ctx.fillRect(pixel.x * PIXEL_SIZE, pixel.y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE);
+            }
+        }
+
+        function addRecentChange(data) {
+            const container = document.getElementById('recentChanges');
+            if (container.children[0]?.textContent === 'No recent changes') {
+                container.innerHTML = '';
+            }
+            
+            const change = document.createElement('div');
+            change.className = 'text-sm p-2 bg-gray-50 rounded';
+            change.innerHTML = `
+                <strong>(${data.x}, ${data.y})</strong> → 
+                <span style="color: rgb(${data.red}, ${data.green}, ${data.blue})">●</span>
+                RGB(${data.red}, ${data.green}, ${data.blue})
+            `;
+            
+            container.insertBefore(change, container.firstChild);
+            
+            // Keep only last 10 changes
+            while (container.children.length > 10) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function updateStats() {
+            totalPixelsModified = Object.keys(canvasState).length;
+            document.getElementById('totalPixels').textContent = totalPixelsModified;
+            document.getElementById('totalRevenue').textContent = `$${(totalPixelsModified * PIXEL_PRICE / 100).toFixed(2)}`;
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
+        }
+
+        // Initialize canvas
+        drawCanvas();
+    </script>
+</body>
+</html>

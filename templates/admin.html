@@ -159,6 +159,11 @@
     </div>
 
     <script>
+        // Get admin credentials from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const adminUser = urlParams.get('user');
+        const adminPass = urlParams.get('pass');
+
         // Handle project creation
         document.getElementById('createProjectForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -174,7 +179,11 @@
             try {
                 const response = await fetch('/api/projects', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-Admin-User': adminUser,
+                        'X-Admin-Pass': adminPass
+                    },
                     body: JSON.stringify(projectData)
                 });
                 
@@ -183,7 +192,7 @@
                     location.reload();
                 } else {
                     const error = await response.json();
-                    alert('Failed to create project: ' + error.message);
+                    alert('Failed to create project: ' + (error.error || error.message));
                 }
             } catch (error) {
                 console.error('Error creating project:', error);

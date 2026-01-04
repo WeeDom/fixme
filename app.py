@@ -72,6 +72,14 @@ def get_projects():
 @app.route('/api/projects', methods=['POST'])
 def create_project():
     """Create a new project (admin only)."""
+    # Check admin authentication
+    auth_header = request.headers.get('Authorization')
+    admin_user = request.headers.get('X-Admin-User')
+    admin_pass = request.headers.get('X-Admin-Pass')
+    
+    if not (admin_user == os.getenv('ADMIN_USERNAME') and admin_pass == os.getenv('ADMIN_PASSWORD')):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
     data = request.json
     
     project = Project(
@@ -257,4 +265,6 @@ def init_db():
 
 if __name__ == '__main__':
     init_db()
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    # Only allow unsafe werkzeug in development
+    is_dev = os.getenv('FLASK_ENV') == 'development'
+    socketio.run(app, debug=is_dev, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=is_dev)

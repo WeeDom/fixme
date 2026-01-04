@@ -105,7 +105,7 @@ The application will be available at `http://localhost:5000`
 ### Production Mode
 
 ```bash
-gunicorn --worker-class eventlet -w 1 app:app --bind 0.0.0.0:5000
+gunicorn --worker-class gevent -w 1 app:app --bind 0.0.0.0:5000
 ```
 
 ## Usage

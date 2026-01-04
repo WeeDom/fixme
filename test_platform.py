@@ -62,16 +62,45 @@ def test_create_project():
         'width': 50,
         'height': 50
     }
+    # Use environment variables for authentication
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'X-Admin-User': os.getenv('ADMIN_USERNAME', 'admin'),
+        'X-Admin-Pass': os.getenv('ADMIN_PASSWORD', 'admin123')
+    }
+    
     response = requests.post(
         f'{BASE_URL}/api/projects',
         json=project_data,
-        headers={'Content-Type': 'application/json'}
+        headers=headers
     )
     assert response.status_code == 201, "Failed to create project"
     project = response.json()
     assert project['name'] == 'Test Project', "Project name mismatch"
     assert project['width'] == 50, "Project width mismatch"
     print(f"✓ Created project: {project['name']}")
+
+def test_create_project_unauthorized():
+    """Test that project creation requires authentication."""
+    print("\nTesting project creation security...")
+    project_data = {
+        'name': 'Unauthorized Project',
+        'description': 'Should fail',
+        'width': 50,
+        'height': 50
+    }
+    # Try without authentication headers
+    response = requests.post(
+        f'{BASE_URL}/api/projects',
+        json=project_data,
+        headers={'Content-Type': 'application/json'}
+    )
+    assert response.status_code == 401, "Project creation should require authentication"
+    print("✓ Project creation properly requires authentication")
 
 def run_all_tests():
     """Run all tests."""
@@ -85,6 +114,7 @@ def run_all_tests():
         test_api_current_state()
         test_admin_panel()
         test_admin_unauthorized()
+        test_create_project_unauthorized()
         test_create_project()
         
         print("\n" + "=" * 60)
